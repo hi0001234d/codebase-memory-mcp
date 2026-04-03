@@ -1252,6 +1252,50 @@ TEST(snippet_include_neighbors_default) {
     PASS();
 }
 
+/* ── Pagination Logic Test ────────────────────────────────────── */
+
+TEST(tool_trace_call_path_paginated) {
+    char tmp[256];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":90,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"trace_call_path\","
+                                   "\"arguments\":{\"function_name\":\"HandleRequest\","
+                                   "\"project\":\"test-project\",\"page\":1,\"page_size\":1}}}");
+    ASSERT_NOT_NULL(resp);
+    /* There's 2 callees, size 1 should yield has_more */
+    ASSERT_NOT_NULL(strstr(resp, "\\\"has_more\\\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\\\"callees_total\\\":2"));
+    
+    free(resp);
+    cleanup_snippet_dir(tmp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_trace_call_path_no_pagination) {
+    char tmp[256];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":91,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"trace_call_path\","
+                                   "\"arguments\":{\"function_name\":\"HandleRequest\","
+                                   "\"project\":\"test-project\"}}}");
+    ASSERT_NOT_NULL(resp);
+    /* Should return both without has_more */
+    ASSERT_NULL(strstr(resp, "\\\"has_more\\\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\\\"callees_total\\\":2"));
+    
+    free(resp);
+    cleanup_snippet_dir(tmp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 /* ── TestSnippet_IncludeNeighbors_Enabled ─────────────────────── */
 
 TEST(snippet_include_neighbors_enabled) {
@@ -1699,6 +1743,8 @@ SUITE(mcp) {
     RUN_TEST(tool_index_status_no_project);
 
     /* Tool handlers with validation */
+    RUN_TEST(tool_trace_call_path_paginated);
+    RUN_TEST(tool_trace_call_path_no_pagination);
     RUN_TEST(tool_trace_call_path_not_found);
     RUN_TEST(tool_trace_missing_function_name);
     RUN_TEST(tool_delete_project_not_found);

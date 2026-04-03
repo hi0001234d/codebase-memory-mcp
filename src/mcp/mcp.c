@@ -265,7 +265,7 @@ static const tool_def_t TOOLS[] = {
      "with arg expressions. cross_service: follow HTTP_CALLS+ASYNC_CALLS+DATA_FLOWS through "
      "Routes.\"},\"parameter_name\":{\"type\":\"string\",\"description\":\"For data_flow mode: "
      "scope trace to a specific parameter name\"},\"edge_types\":{\"type\":\"array\",\"items\":{"
-     "\"type\":\"string\"}}},\"required\":[\"function_name\",\"project\"]}"},
+     "\"type\":\"string\"}},\"page\":{\"type\":\"integer\"},\"page_size\":{\"type\":\"integer\"}},\"required\":[\"function_name\",\"project\"]}"},
 
     {"get_code_snippet",
      "Read source code for a function/class/symbol. IMPORTANT: First call search_graph to find the "
@@ -1231,6 +1231,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     char *mode = cbm_mcp_get_string_arg(args, "mode");
     char *param_name = cbm_mcp_get_string_arg(args, "parameter_name");
     int depth = cbm_mcp_get_int_arg(args, "depth", 3);
+    int page = cbm_mcp_get_int_arg(args, "page", 0);
+    int page_size = cbm_mcp_get_int_arg(args, "page_size", 50);
 
     if (!func_name) {
         free(project);
@@ -1346,13 +1348,20 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
 
     cbm_traverse_result_t tr_out = {0};
     cbm_traverse_result_t tr_in = {0};
+    bool has_more = false;
 
     if (do_outbound) {
         cbm_store_bfs(store, nodes[0].id, "outbound", edge_types, edge_type_count, depth, 100,
                       &tr_out);
 
+        yyjson_mut_obj_add_int(doc, root, "callees_total", tr_out.visited_count);
+        int start_idx = (page > 0) ? (page - 1) * page_size : 0;
+        int end_idx = (page > 0) ? start_idx + page_size : tr_out.visited_count;
+        if (end_idx > tr_out.visited_count) end_idx = tr_out.visited_count;
+        if (page > 0 && end_idx < tr_out.visited_count) has_more = true;
+
         yyjson_mut_val *callees = yyjson_mut_arr(doc);
-        for (int i = 0; i < tr_out.visited_count; i++) {
+        for (int i = start_idx; i < end_idx; i++) {
             yyjson_mut_val *item = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_str(doc, item, "name",
                                    tr_out.visited[i].node.name ? tr_out.visited[i].node.name : "");
@@ -1369,8 +1378,14 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         cbm_store_bfs(store, nodes[0].id, "inbound", edge_types, edge_type_count, depth, 100,
                       &tr_in);
 
+        yyjson_mut_obj_add_int(doc, root, "callers_total", tr_in.visited_count);
+        int start_idx = (page > 0) ? (page - 1) * page_size : 0;
+        int end_idx = (page > 0) ? start_idx + page_size : tr_in.visited_count;
+        if (end_idx > tr_in.visited_count) end_idx = tr_in.visited_count;
+        if (page > 0 && end_idx < tr_in.visited_count) has_more = true;
+
         yyjson_mut_val *callers = yyjson_mut_arr(doc);
-        for (int i = 0; i < tr_in.visited_count; i++) {
+        for (int i = start_idx; i < end_idx; i++) {
             yyjson_mut_val *item = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_str(doc, item, "name",
                                    tr_in.visited[i].node.name ? tr_in.visited[i].node.name : "");
@@ -1381,6 +1396,10 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
             yyjson_mut_arr_add_val(callers, item);
         }
         yyjson_mut_obj_add_val(doc, root, "callers", callers);
+    }
+
+    if (page > 0 && has_more) {
+        yyjson_mut_obj_add_bool(doc, root, "has_more", true);
     }
 
     /* Serialize BEFORE freeing traversal results (yyjson borrows strings) */
